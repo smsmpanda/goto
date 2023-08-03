@@ -1,16 +1,26 @@
 package main
 
 import (
-	//	"bufio"
 	"encoding/gob"
 	"errors"
 	"io"
 	"log"
+	"net/rpc"
 	"os"
 	"sync"
 )
 
 const saveQueueLength = 1000
+
+type Store interface {
+	Put(url, key *string) error
+	Get(key, url *string) error
+}
+
+type ProxyStore struct {
+	urls   *URLStore // local cache
+	client *rpc.Client
+}
 
 type URLStore struct {
 	urls map[string]string
@@ -23,21 +33,25 @@ type record struct {
 }
 
 func NewURLStore(filename string) *URLStore {
-	s := &URLStore{
-		urls: make(map[string]string),
-		save: make(chan record, saveQueueLength),
+	s := &URLStore{urls: make(map[string]string)}
+	if filename != "" {
+		s.save = make(chan record, saveQueueLength)
+		if err := s.load(filename); err != nil {
+			log.Println("Error loading URLStore: ", err)
+		}
+		go s.saveLoop(filename)
 	}
-	if err := s.load(filename); err != nil {
-		log.Println("Error loading URLStore:", err)
-	}
-	go s.saveLoop(filename)
 	return s
 }
 
-func (s *URLStore) Get(key string) string {
+func (s *URLStore) Get(key, url *string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.urls[key]
+	if u, ok := s.urls[*key]; ok {
+		*url = u
+		return nil
+	}
+	return errors.New("key not found")
 }
 
 func (s *URLStore) Set(key, url *string) error {
@@ -50,20 +64,15 @@ func (s *URLStore) Set(key, url *string) error {
 	return nil
 }
 
-// RPC方式
-func (s *URLStore) RpcGet(key, url *string) error {
+func (s *URLStore) count() int {
 	s.mu.RLock()
-	defer s.mu.Unlock()
-	if u, ok := s.urls[*key]; ok {
-		*url = u
-		return nil
-	}
-	return errors.New("key not found")
+	defer s.mu.RUnlock()
+	return len(s.urls)
 }
 
 func (s *URLStore) Put(url, key *string) error {
 	for {
-		*key = genKey(s.Count())
+		*key = genKey(s.count())
 		if err := s.Set(key, url); err == nil {
 			break
 		}
@@ -74,22 +83,12 @@ func (s *URLStore) Put(url, key *string) error {
 	return nil
 }
 
-func (s *URLStore) Count() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.urls)
-}
-
 func (s *URLStore) load(filename string) error {
 	f, err := os.Open(filename)
 	if err != nil {
-		log.Println("Error opening URLStore:", err)
 		return err
 	}
 	defer f.Close()
-	// buffered reading:
-	// b := bufio.NewReader(f)
-	// d := gob.NewDecoder(b)
 	d := gob.NewDecoder(f)
 	for err == nil {
 		var r record
@@ -100,8 +99,6 @@ func (s *URLStore) load(filename string) error {
 	if err == io.EOF {
 		return nil
 	}
-	// error occurred:
-	log.Println("Error decoding URLStore:", err) // map hasn't been read correctly
 	return err
 }
 
@@ -110,16 +107,41 @@ func (s *URLStore) saveLoop(filename string) {
 	if err != nil {
 		log.Fatal("Error opening URLStore: ", err)
 	}
-	defer f.Close()
 	e := gob.NewEncoder(f)
-	// buffered encoding:
-	// b := bufio.NewWriter(f)
-	// e := gob.NewEncoder(b)
-	// defer b.Flush()
 	for {
-		r := <-s.save // takes a record from the channel
+		r := <-s.save
 		if err := e.Encode(r); err != nil {
 			log.Println("Error saving to URLStore: ", err)
 		}
 	}
+}
+
+func NewProxyStore(addr string) *ProxyStore {
+	client, err := rpc.DialHTTP("tcp", addr)
+	if err != nil {
+		log.Println("Error constructing ProxyStore: ", err)
+		// return // ?
+	}
+	return &ProxyStore{urls: NewURLStore(""), client: client}
+}
+
+func (s *ProxyStore) Get(key, url *string) error {
+	if err := s.urls.Get(key, url); err == nil {
+		return nil
+	}
+	// rpc call to master:
+	if err := s.client.Call("Store.Get", key, url); err != nil {
+		return err
+	}
+	s.urls.Set(key, url) // update local cache
+	return nil
+}
+
+func (s *ProxyStore) Put(url, key *string) error {
+	// rpc call to master:
+	if err := s.client.Call("Store.Put", url, key); err != nil {
+		return err
+	}
+	s.urls.Set(key, url) // update local cache
+	return nil
 }

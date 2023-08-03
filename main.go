@@ -13,15 +13,22 @@ var (
 	dataFile   = flag.String("file", "store.gob", "data store file name")
 	hostname   = flag.String("host", "localhost", "http host name")
 	rpcEnabled = flag.Bool("rpc", false, "enbale RPC server")
+	masterAddr = flag.String("master", "", "RPC master address")
 )
 
-var store *URLStore
+var store Store
 
 func main() {
 
 	fmt.Println(*welcome)
 	flag.Parse()
 	store = NewURLStore(*dataFile)
+
+	if *masterAddr != "" {
+		store = NewProxyStore(*masterAddr)
+	} else {
+		store = NewURLStore(*dataFile)
+	}
 
 	if *rpcEnabled {
 		rpc.RegisterName("Store", store)
@@ -35,9 +42,13 @@ func main() {
 
 func Redirect(w http.ResponseWriter, r *http.Request) {
 	key := r.URL.Path[1:]
-	url := store.Get(key)
-	if url == "" {
+	if key == "" {
 		http.NotFound(w, r)
+	}
+	var url string
+	if err := store.Get(&key, &url); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	http.Redirect(w, r, url, http.StatusFound)
 }
