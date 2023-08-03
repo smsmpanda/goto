@@ -5,14 +5,7 @@ import (
 	"net/http"
 )
 
-const AddForm = `
-<form method="POST" action="/add">
-URL: <input type="text" name="url">
-<input type="submit" value="Add">
-</form>
-`
-
-var store = NewURLStore()
+var store = NewURLStore("store.gob")
 
 func main() {
 	fmt.Println("Welcome to goto!")
@@ -41,3 +34,10 @@ func Add(w http.ResponseWriter, r *http.Request) {
 	key := store.Put(url)
 	fmt.Fprintf(w, "http://localhost:8080/%s", key)
 }
+
+const AddForm = `
+<form method="POST" action="/add">
+URL: <input type="text" name="url">
+<input type="submit" value="Add">
+</form>
+`
