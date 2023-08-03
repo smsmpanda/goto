@@ -2,8 +2,8 @@ package main
 
 import (
 	//	"bufio"
-
-	"encoding/json"
+	"encoding/gob"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -40,31 +40,44 @@ func (s *URLStore) Get(key string) string {
 	return s.urls[key]
 }
 
-func (s *URLStore) Set(key, url string) bool {
+func (s *URLStore) Set(key, url *string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, present := s.urls[key]; present {
-		return false
+	if _, present := s.urls[*key]; present {
+		return errors.New("key already exists")
 	}
-	s.urls[key] = url
-	return true
+	s.urls[*key] = *url
+	return nil
+}
+
+// RPC方式
+func (s *URLStore) RpcGet(key, url *string) error {
+	s.mu.RLock()
+	defer s.mu.Unlock()
+	if u, ok := s.urls[*key]; ok {
+		*url = u
+		return nil
+	}
+	return errors.New("key not found")
+}
+
+func (s *URLStore) Put(url, key *string) error {
+	for {
+		*key = genKey(s.Count())
+		if err := s.Set(key, url); err == nil {
+			break
+		}
+	}
+	if s.save != nil {
+		s.save <- record{*key, *url}
+	}
+	return nil
 }
 
 func (s *URLStore) Count() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.urls)
-}
-
-func (s *URLStore) Put(url string) string {
-	for {
-		key := genKey(s.Count())
-		if ok := s.Set(key, url); ok {
-			s.save <- record{key, url}
-			return key
-		}
-	}
-	panic("shouldn't get here")
 }
 
 func (s *URLStore) load(filename string) error {
@@ -77,11 +90,11 @@ func (s *URLStore) load(filename string) error {
 	// buffered reading:
 	// b := bufio.NewReader(f)
 	// d := gob.NewDecoder(b)
-	d := json.NewDecoder(f)
+	d := gob.NewDecoder(f)
 	for err == nil {
 		var r record
 		if err = d.Decode(&r); err == nil {
-			s.Set(r.Key, r.URL)
+			s.Set(&r.Key, &r.URL)
 		}
 	}
 	if err == io.EOF {
@@ -98,7 +111,7 @@ func (s *URLStore) saveLoop(filename string) {
 		log.Fatal("Error opening URLStore: ", err)
 	}
 	defer f.Close()
-	e := json.NewEncoder(f)
+	e := gob.NewEncoder(f)
 	// buffered encoding:
 	// b := bufio.NewWriter(f)
 	// e := gob.NewEncoder(b)
