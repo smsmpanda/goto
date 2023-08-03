@@ -2,7 +2,8 @@ package main
 
 import (
 	//	"bufio"
-	"encoding/gob"
+
+	"encoding/json"
 	"io"
 	"log"
 	"os"
@@ -76,7 +77,7 @@ func (s *URLStore) load(filename string) error {
 	// buffered reading:
 	// b := bufio.NewReader(f)
 	// d := gob.NewDecoder(b)
-	d := gob.NewDecoder(f)
+	d := json.NewDecoder(f)
 	for err == nil {
 		var r record
 		if err = d.Decode(&r); err == nil {
@@ -97,7 +98,7 @@ func (s *URLStore) saveLoop(filename string) {
 		log.Fatal("Error opening URLStore: ", err)
 	}
 	defer f.Close()
-	e := gob.NewEncoder(f)
+	e := json.NewEncoder(f)
 	// buffered encoding:
 	// b := bufio.NewWriter(f)
 	// e := gob.NewEncoder(b)

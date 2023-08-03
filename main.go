@@ -9,7 +9,7 @@ import (
 var (
 	welcome    = flag.String("welcome", "welcome to goto", "欢迎语")
 	listenAddr = flag.String("http", "8080", "http listen address")
-	dataFile   = flag.String("file", "store.gob", "data store file name")
+	dataFile   = flag.String("file", "store.json", "data store file name")
 	hostname   = flag.String("host", "localhost", "http host name")
 )
 
