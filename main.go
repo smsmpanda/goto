@@ -1,18 +1,29 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"net/http"
 )
 
-var store = NewURLStore("store.gob")
+var (
+	welcome    = flag.String("welcome", "welcome to goto", "欢迎语")
+	listenAddr = flag.String("http", "8080", "http listen address")
+	dataFile   = flag.String("file", "store.gob", "data store file name")
+	hostname   = flag.String("host", "localhost", "http host name")
+)
+
+var store *URLStore
 
 func main() {
-	fmt.Println("Welcome to goto!")
+
+	fmt.Println(*welcome)
+	flag.Parse()
+	store = NewURLStore(*dataFile)
 
 	http.HandleFunc("/", Redirect)
 	http.HandleFunc("/add", Add)
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(":"+*listenAddr, nil)
 }
 
 func Redirect(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +43,7 @@ func Add(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	key := store.Put(url)
-	fmt.Fprintf(w, "http://localhost:8080/%s", key)
+	fmt.Fprintf(w, "http://%s/%s", *hostname+":"+*listenAddr, key)
 }
 
 const AddForm = `
